@@ -14,20 +14,16 @@ from sensor_msgs.msg import Image
 from cv_bridge import CvBridge, CvBridgeError
 
 
-class find_ball:
+class select_color:
 
   def __init__(self):
 
 
-    self.image_pub = rospy.Publisher("/image/compressed", CompressedImage, queue_size=1)    
-    self.point_pub = rospy.Publisher("/control/setpoint", Point, queue_size=1)
+    self.color_lower_pub = rospy.Publisher("/parameter/color_lower", Point, queue_size=1)
+    self.color_upper_pub = rospy.Publisher("/parameter/color_upper", Point, queue_size=1)
 
     #self.image_sub = rospy.Subscriber("/usb_cam/image_raw/compressed", CompressedImage, self.img_cb)
     self.image_sub = rospy.Subscriber("/raspicam_node/image/compressed", CompressedImage, self.img_cb)    
-    
-    self.color_lower_sub = rospy.Subscriber("/parameter/color_lower", Point, self.color_upper_cb)    
-    self.color_upper_sub = rospy.Subscriber("/parameter/color_upper", Point, self.color_lower_cb)    
-
 
     self.bridge = CvBridge()
 
@@ -55,14 +51,6 @@ class find_ball:
 
     return
 
-
-  def color_upper_cb(self, data):
-    self.upper_history.append( [data[0], data[1], data[2]] )
-    return
-
-  def color_lower_cb(self, data):
-    self.lower_history.append( [data[0], data[1], data[2]] )
-    return
 
   def mouse_cb(self,event,x,y,flags,param):
     if event == cv2.EVENT_LBUTTONDBLCLK:
@@ -113,6 +101,10 @@ class find_ball:
       self.upper_history.append( self.color_upper )
 
 
+      # Publish Parameters to Robot
+      self.color_lower_pub.publish( Point(self.color_lower[0],self.color_lower[1],self.color_lower[2]) )
+      self.color_upper_pub.publish( Point(self.color_upper[0],self.color_upper[1],self.color_upper[2]) )
+
     return
 
 
@@ -139,12 +131,9 @@ class find_ball:
       # Color Mask
       cumulative_mask = cv2.inRange( self.img_bgr8, self.color_lower, self.color_upper)
 
-      for i in range(0,len(min(self.lower_history,self.upper_history))):
+      for i in range(0,len(self.lower_history)):
         mask = cv2.inRange( self.img_bgr8, self.lower_history[i], self.upper_history[i])
         cumulative_mask = cv2.bitwise_or(mask, cumulative_mask, cumulative_mask)
-
-
-         
 
       ##############################################################################
       # Erosion / Dilation
@@ -153,12 +142,14 @@ class find_ball:
 
       
       img_erosion = cv2.erode(cumulative_mask, kernel, iterations = 1)
-      img_dilation = cv2.dilate(img_erosion, kernel, iterations = 3)      
+      img_dilation = cv2.dilate(img_erosion, kernel, iterations = 3)
+
+
+      
       self.img_down = cv2.resize(img_erosion, None, fx=0.1, fy=0.1, interpolation = cv2.INTER_NEAREST)
-      #img_center = self.img_down
 
-      img_center = cumulative_mask[::4,::4]
 
+      img_center = self.img_down
 
 
       h = 0
@@ -212,25 +203,19 @@ class find_ball:
     cv2.imshow("Double-Click to Select Color", self.img_grey)
     cv2.waitKey(1)
 
+
+
     return
 
 
 
 
 def main(args):
-  ic = find_ball()
-  rospy.init_node('find_ball', anonymous=True)
+  ic = select_color()
+  rospy.init_node('select_color', anonymous=True)
 
   try:
-    rate = rospy.Rate(10)
-    while not rospy.is_shutdown():
-
-      # Publish
-      if ic.fill_pct > 0.01:
-        ic.point_pub.publish( Point(ic.x_pct, ic.y_pct, ic.fill_pct) )
-      else:
-        print "Fill Threshold Not Satisfied"
-      rate.sleep()
+    rospy.spin()
   except KeyboardInterrupt:
     print("Shutting down")
 
